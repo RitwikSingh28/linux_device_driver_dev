@@ -1,7 +1,7 @@
 #include "linux/device.h"
 #include "linux/device/class.h"
-#include "linux/err.h"
 #include "linux/fs.h"
+#include "linux/slab.h"
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/cdev.h>
@@ -18,8 +18,20 @@ struct device* device_dev;
 
 struct cdev my_cdev;
 
+static char* buffer;
+static size_t buffer_size = 2048;
+
 static int example_open(struct inode *inode, struct file *filp) {
   printk(KERN_INFO "OPEN: Open request received\n");
+
+  buffer = kmalloc(buffer_size, GFP_KERNEL);
+  if (!buffer) {
+    printk(KERN_ERR "Memory allocation failed.\n");
+    return -ENOMEM;
+  }
+
+  printk(KERN_INFO "OPEN: Allocated %zu Bytes\n", buffer_size);
+  memset(buffer, 0, buffer_size);
   return 0;
 }
 
@@ -33,34 +45,37 @@ static ssize_t example_write(struct file *filp, const char __user *buffer, size_
   return size;
 }
 
+static int example_release(struct inode *inode, struct file *filp) {
+  printk(KERN_INFO "RELEASE: Release request received\n");
+
+  if (buffer) {
+    kfree(buffer);
+    buffer = NULL;
+  }
+
+  return 0;
+}
+
 struct file_operations fops = {
   .open = example_open,
   .read = example_read,
   .write = example_write,
+  .release = example_release,
 };
 
 static int __init my_init(void) {
-  printk(KERN_INFO "Hello there!\n");
-
-  printk(KERN_INFO "Getting the major/minor numbers\n");
-
   if (alloc_chrdev_region(&device_number, 0, NUM_DEVICES, "sample_chrdev")) {
     printk(KERN_ERR "Couldn't get the numbers. Bailing out!\n");
     return -1;
   }
-  printk(KERN_INFO "Allotted <major>:<minor> = %d:%d\n", MAJOR(device_number), MINOR(device_number));
 
-  printk(KERN_INFO "Initializing chrdev struct...\n");
   cdev_init(&my_cdev, &fops);
   my_cdev.owner = THIS_MODULE;
-  printk(KERN_INFO "Initialization Done...\n");
 
-  printk(KERN_INFO "Adding driver to kernel\n");
   if (cdev_add(&my_cdev, device_number, NUM_DEVICES)) {
     printk(KERN_ERR "Failed in registering the driver with the kernel");
     return -1;
   }
-  printk(KERN_INFO "Done...\n");
 
   // Create device class
   class_dev = class_create("sample_class");
