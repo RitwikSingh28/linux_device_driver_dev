@@ -1,5 +1,6 @@
 #include "linux/device.h"
 #include "linux/device/class.h"
+#include "linux/err.h"
 #include "linux/fs.h"
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -42,11 +43,10 @@ static int __init my_init(void) {
   printk(KERN_INFO "Hello there!\n");
 
   printk(KERN_INFO "Getting the major/minor numbers\n");
-  int res = alloc_chrdev_region(&device_number, 0, NUM_DEVICES, "sample_chrdev");
 
-  if (res < 0) {
+  if (alloc_chrdev_region(&device_number, 0, NUM_DEVICES, "sample_chrdev")) {
     printk(KERN_ERR "Couldn't get the numbers. Bailing out!\n");
-    return res;
+    return -1;
   }
   printk(KERN_INFO "Allotted <major>:<minor> = %d:%d\n", MAJOR(device_number), MINOR(device_number));
 
@@ -56,17 +56,22 @@ static int __init my_init(void) {
   printk(KERN_INFO "Initialization Done...\n");
 
   printk(KERN_INFO "Adding driver to kernel\n");
-  res = cdev_add(&my_cdev, device_number, NUM_DEVICES);
-  if (res < 0) {
+  if (cdev_add(&my_cdev, device_number, NUM_DEVICES)) {
     printk(KERN_ERR "Failed in registering the driver with the kernel");
-    return res;
+    return -1;
   }
   printk(KERN_INFO "Done...\n");
 
   // Create device class
   class_dev = class_create("sample_class");
+  if (IS_ERR(class_dev)) {
+    printk(KERN_ERR "Failed in creating the struct class for the device");
+  }
   // Populate the sysfs with device information
   device_dev = device_create(class_dev, NULL, device_number, NULL, "sample");
+  if (IS_ERR(device_dev)) {
+    printk(KERN_ERR "Failed in creating the struct device for the device");
+  }
 
   printk(KERN_INFO "Module init successful...\n");
   return 0;
@@ -76,7 +81,6 @@ static void __exit my_exit(void) {
   device_destroy(class_dev, device_number);
   class_destroy(class_dev);
   cdev_del(&my_cdev);
-  printk(KERN_INFO "Unregistering chr_dev\n");
   unregister_chrdev_region(device_number, NUM_DEVICES);
   printk(KERN_INFO "Goodbye there!\n");
 }
